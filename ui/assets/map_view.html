@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AESIL Map</title>
+  <style>
+    :root {
+      --bg: #07131f;
+      --panel: rgba(8, 19, 31, 0.84);
+      --text: #d7e7f4;
+      --muted: rgba(215, 231, 244, 0.72);
+      --track: #35c9c3;
+      --aircraft: #38bdf8;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --grid: rgba(120, 173, 214, 0.16);
+      --grid-major: rgba(120, 173, 214, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body, #app {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top left, rgba(44, 112, 168, 0.16), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(17, 72, 125, 0.22), transparent 32%),
+        var(--bg);
+      color: var(--text);
+      font-family: "DejaVu Sans", "Noto Sans", sans-serif;
+    }
+
+    #map,
+    #fallback {
+      position: absolute;
+      inset: 0;
+    }
+
+    #map.hidden,
+    #fallback.hidden,
+    #empty.hidden {
+      display: none;
+    }
+
+    #fallback {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #legend {
+      position: absolute;
+      z-index: 900;
+      background: var(--panel);
+      border: 1px solid rgba(137, 180, 216, 0.18);
+      border-radius: 12px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+    }
+
+    #legend {
+      right: 14px;
+      top: 14px;
+      padding: 10px 12px;
+      min-width: 180px;
+      pointer-events: none;
+    }
+
+    .leaflet-control-zoom a,
+    .map-reset-control a {
+      width: 30px !important;
+      height: 30px !important;
+      line-height: 30px !important;
+      text-align: center !important;
+      font-size: 18px !important;
+      color: var(--text) !important;
+      background: var(--panel) !important;
+      border: 1px solid rgba(137, 180, 216, 0.18) !important;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+    }
+
+    .leaflet-control-zoom {
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .leaflet-control-zoom a:first-child,
+    .map-reset-control a {
+      border-top-left-radius: 4px !important;
+      border-top-right-radius: 4px !important;
+    }
+
+    .leaflet-control-zoom a:last-child {
+      border-bottom-left-radius: 4px !important;
+      border-bottom-right-radius: 4px !important;
+    }
+
+    .map-reset-control {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent !important;
+      margin-bottom: 4px;
+    }
+
+    .map-reset-control a {
+      border-radius: 4px !important;
+      text-decoration: none;
+      font-size: 14px !important;
+      font-weight: 700;
+    }
+
+    .leaflet-control-zoom a:hover,
+    .map-reset-control a:hover {
+      background: rgba(255, 255, 255, 0.08) !important;
+    }
+
+    .title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .line {
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      flex: none;
+    }
+
+    .swatch.track {
+      width: 18px;
+      height: 0;
+      border: 0;
+      border-top: 3px solid var(--track);
+    }
+
+    .swatch.aircraft {
+      background: var(--aircraft);
+      border-radius: 50%;
+    }
+
+    .swatch.red {
+      background: var(--red);
+    }
+
+    .swatch.blue {
+      background: var(--blue);
+    }
+
+    #empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 800;
+      pointer-events: none;
+    }
+
+    #empty span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 220px;
+      min-height: 56px;
+      padding: 14px 22px;
+      border-radius: 12px;
+      border: 1px solid rgba(137, 180, 216, 0.18);
+      background: var(--panel);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+      color: rgba(215, 231, 244, 0.82);
+      font-size: 16px;
+      letter-spacing: 0.03em;
+      pointer-events: none;
+    }
+
+    .leaflet-container {
+      background: #0a1624;
+    }
+
+    .aircraft-marker,
+    .target-marker {
+      width: 8px;
+      height: 8px;
+      border: 1px solid #f8fafc;
+      box-shadow: 0 0 16px rgba(0, 0, 0, 0.28);
+    }
+
+    .aircraft-marker {
+      background: var(--aircraft);
+      border-radius: 50%;
+    }
+
+    .target-marker.red {
+      background: var(--red);
+    }
+
+    .target-marker.blue {
+      background: var(--blue);
+    }
+
+    .target-marker {
+      border-radius: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map" class="hidden"></div>
+    <canvas id="fallback" class="hidden"></canvas>
+    <div id="legend">
+      <div class="title">Legend</div>
+      <div class="legend-row"><span class="swatch track"></span><span>Track</span></div>
+      <div class="legend-row"><span class="swatch aircraft"></span><span>Aircraft</span></div>
+      <div class="legend-row"><span class="swatch red"></span><span>Red target</span></div>
+      <div class="legend-row"><span class="swatch blue"></span><span>Blue target</span></div>
+    </div>
+    <div id="empty"><span>No map data yet</span></div>
+  </div>
+
+  <script>
+    const mapElement = document.getElementById("map");
+    const fallbackCanvas = document.getElementById("fallback");
+    const fallbackCtx = fallbackCanvas.getContext("2d");
+    const empty = document.getElementById("empty");
+    const dpr = window.devicePixelRatio || 1;
+
+    const config = {
+      localTileTemplate: "./tiles/{z}/{x}/{y}.png",
+      localLeafletCss: "./vendor/leaflet/leaflet.css",
+      localLeafletJs: "./vendor/leaflet/leaflet.js",
+      cdnLeafletCss: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+      cdnLeafletJs: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+      maxZoom: 19,
+      localMaxZoom: 19,
+      overzoomLevels: 4
+    };
+
+    const appState = {
+      aircraft: null,
+      track: [],
+      targets: [],
+    };
+
+    const mapState = {
+      mode: "loading",
+      map: null,
+      trackLine: null,
+      aircraftMarker: null,
+      targetMarkers: new Map(),
+      userMovedMap: false,
+      leafletReady: false,
+      localLayer: null,
+      activeBaseLayer: null,
+      offlineMapInfo: null,
+      mapLoaded: false,
+    };
+
+    function setMode(mode) {
+      mapState.mode = mode;
+      const usingLeaflet = mode === "leaflet";
+      mapElement.classList.toggle("hidden", !usingLeaflet);
+      fallbackCanvas.classList.toggle("hidden", usingLeaflet);
+      renderFallback();
+      updateEmptyState();
+    }
+
+    function updateEmptyState() {
+      empty.classList.toggle("hidden", mapState.mapLoaded);
+    }
+
+    function injectStylesheet(href) {
+      return new Promise((resolve, reject) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = href;
+        link.onload = () => resolve();
+        link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
+        document.head.appendChild(link);
+      });
+    }
+
+    function injectScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensureLeaflet() {
+      if (window.L) {
+        return true;
+      }
+
+      const assetChains = [
+        { css: config.localLeafletCss, js: config.localLeafletJs, modeLabel: "local Leaflet assets" },
+        { css: config.cdnLeafletCss, js: config.cdnLeafletJs, modeLabel: "CDN Leaflet assets" }
+      ];
+
+      for (const asset of assetChains) {
+        try {
+          await injectStylesheet(asset.css);
+          await injectScript(asset.js);
+          if (window.L) {
+            mapState.leafletReady = true;
+            return true;
+          }
+        } catch (_error) {
+        }
+      }
+
+      return false;
+    }
+
+    function makeDivIcon(className) {
+      return window.L.divIcon({
+        className: "",
+        html: `<div class="${className}"></div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+    }
+
+    function initializeLeafletMap() {
+      if (mapState.map || !window.L) {
+        return;
+      }
+
+      const L = window.L;
+      const map = L.map("map", {
+        zoomControl: false,
+        preferCanvas: true,
+        attributionControl: false,
+      }).setView([23.6978, 120.9605], 7);
+
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+
+      map.on("dragstart zoomstart", () => {
+        mapState.userMovedMap = true;
+      });
+
+      mapState.localLayer = createOfflineTileLayer();
+
+      let localTileErrors = 0;
+      mapState.localLayer.on("tileerror", () => {
+        localTileErrors += 1;
+      });
+
+      mapState.map = map;
+
+      mapState.trackLine = L.polyline([], {
+        color: "#35c9c3",
+        weight: 4,
+        opacity: 0.9,
+      }).addTo(map);
+
+      addResetViewControl(map);
+      setMode("leaflet");
+      applyOfflineBaseLayer();
+    }
+
+    function createOfflineTileLayer() {
+      const info = mapState.offlineMapInfo || {};
+      const minZoom = Number.isInteger(info.minzoom) ? info.minzoom : 0;
+      const maxNativeZoom = Number.isInteger(info.maxzoom) ? info.maxzoom : config.localMaxZoom;
+      const maxZoom = Math.max(maxNativeZoom + config.overzoomLevels, minZoom);
+
+      return window.L.tileLayer(config.localTileTemplate, {
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        maxNativeZoom: maxNativeZoom,
+        attribution: "Offline tiles",
+      });
+    }
+
+    function switchBaseLayer(layer, modeLabel) {
+      if (!mapState.map) {
+        return;
+      }
+      if (mapState.activeBaseLayer && mapState.map.hasLayer(mapState.activeBaseLayer)) {
+        mapState.map.removeLayer(mapState.activeBaseLayer);
+      }
+      layer.addTo(mapState.map);
+      mapState.activeBaseLayer = layer;
+    }
+
+    function applyOfflineBaseLayer() {
+      if (!mapState.map) {
+        return;
+      }
+      switchBaseLayer(mapState.localLayer, "Offline tiles");
+      updateEmptyState();
+      fitMapToOfflineBounds();
+    }
+
+    function fitMapToOfflineBounds() {
+      if (!mapState.map || !mapState.offlineMapInfo) {
+        return;
+      }
+
+      const info = mapState.offlineMapInfo;
+      mapState.map.invalidateSize(false);
+
+      if (Array.isArray(info.bounds) && info.bounds.length === 4 && window.L) {
+        const [west, south, east, north] = info.bounds;
+        const bounds = window.L.latLngBounds([[south, west], [north, east]]);
+        mapState.map.fitBounds(bounds.pad(0.1), {
+          animate: false,
+          maxZoom: Number.isInteger(info.maxzoom) ? info.maxzoom : undefined,
+        });
+        if (mapState.localLayer) {
+          mapState.localLayer.redraw();
+        }
+        return;
+      }
+
+      if (Array.isArray(info.center) && info.center.length === 3) {
+        const [lon, lat, zoom] = info.center;
+        mapState.map.setView([lat, lon], zoom, { animate: false });
+        if (mapState.localLayer) {
+          mapState.localLayer.redraw();
+        }
+      }
+    }
+
+    function replaceOfflineLayer() {
+      if (!window.L || !mapState.map) {
+        return;
+      }
+
+      if (mapState.localLayer && mapState.activeBaseLayer === mapState.localLayer && mapState.map.hasLayer(mapState.localLayer)) {
+        mapState.map.removeLayer(mapState.localLayer);
+      }
+
+      mapState.localLayer = createOfflineTileLayer();
+
+      switchBaseLayer(mapState.localLayer, "Offline tiles");
+      updateEmptyState();
+      window.setTimeout(() => {
+        fitMapToOfflineBounds();
+      }, 0);
+    }
+
+    function addResetViewControl(map) {
+      const Control = window.L.Control.extend({
+        options: { position: "bottomright" },
+        onAdd() {
+          const container = window.L.DomUtil.create("div", "leaflet-bar map-reset-control");
+          const button = window.L.DomUtil.create("a", "", container);
+          button.href = "#";
+          button.title = "Reset map view";
+          button.textContent = "⌖";
+          window.L.DomEvent.disableClickPropagation(container);
+          window.L.DomEvent.on(button, "click", (event) => {
+            window.L.DomEvent.preventDefault(event);
+            fitMapToOfflineBounds();
+          });
+          return container;
+        }
+      });
+      map.addControl(new Control());
+    }
+
+    function renderLeaflet() {
+      if (!mapState.map || !window.L) {
+        return;
+      }
+
+      const L = window.L;
+      const trackLatLngs = appState.track.map((point) => [point.latitude, point.longitude]);
+      mapState.trackLine.setLatLngs(trackLatLngs);
+
+      if (appState.aircraft) {
+        const latLng = [appState.aircraft.latitude, appState.aircraft.longitude];
+        if (!mapState.aircraftMarker) {
+          mapState.aircraftMarker = L.marker(latLng, {
+            icon: makeDivIcon("aircraft-marker"),
+            title: "Aircraft",
+          }).addTo(mapState.map);
+        } else {
+          mapState.aircraftMarker.setLatLng(latLng);
+        }
+      } else if (mapState.aircraftMarker) {
+        mapState.map.removeLayer(mapState.aircraftMarker);
+        mapState.aircraftMarker = null;
+      }
+
+      const activeIds = new Set();
+      for (const target of appState.targets) {
+        activeIds.add(target.tracker_id);
+        const latLng = [target.position.latitude, target.position.longitude];
+        const cssClass = target.vehicle_name.toLowerCase().includes("red") ? "target-marker red" : "target-marker blue";
+        const popupText = `${target.vehicle_name} #${target.tracker_id}<br>${target.position.latitude.toFixed(6)}, ${target.position.longitude.toFixed(6)}`;
+
+        if (!mapState.targetMarkers.has(target.tracker_id)) {
+          const marker = L.marker(latLng, {
+            icon: makeDivIcon(cssClass),
+            title: `${target.vehicle_name} #${target.tracker_id}`,
+          }).addTo(mapState.map);
+          marker.bindPopup(popupText);
+          mapState.targetMarkers.set(target.tracker_id, marker);
+        } else {
+          const marker = mapState.targetMarkers.get(target.tracker_id);
+          marker.setLatLng(latLng);
+          marker.setIcon(makeDivIcon(cssClass));
+          marker.setPopupContent(popupText);
+        }
+      }
+
+      for (const [trackerId, marker] of mapState.targetMarkers.entries()) {
+        if (!activeIds.has(trackerId)) {
+          mapState.map.removeLayer(marker);
+          mapState.targetMarkers.delete(trackerId);
+        }
+      }
+
+      if (!mapState.userMovedMap) {
+        fitMapToData();
+      }
+
+      updateEmptyState();
+    }
+
+    function fitMapToData() {
+      if (!mapState.map || !window.L) {
+        return;
+      }
+
+      const points = [];
+      if (appState.aircraft) {
+        points.push([appState.aircraft.latitude, appState.aircraft.longitude]);
+      }
+      for (const point of appState.track) {
+        points.push([point.latitude, point.longitude]);
+      }
+      for (const target of appState.targets) {
+        points.push([target.position.latitude, target.position.longitude]);
+      }
+
+      if (points.length === 0) {
+        return;
+      }
+
+      if (points.length === 1) {
+        mapState.map.setView(points[0], 18);
+        return;
+      }
+
+      const bounds = window.L.latLngBounds(points);
+      mapState.map.fitBounds(bounds.pad(0.25), { animate: false });
+    }
+
+    function resizeFallbackCanvas() {
+      const rect = fallbackCanvas.getBoundingClientRect();
+      fallbackCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      fallbackCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      fallbackCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderFallback();
+    }
+
+    function toRadians(value) {
+      return value * Math.PI / 180.0;
+    }
+
+    function toLocalXY(point, reference) {
+      const radius = 6378137.0;
+      const lat = toRadians(point.latitude);
+      const lon = toRadians(point.longitude);
+      const lat0 = toRadians(reference.latitude);
+      const lon0 = toRadians(reference.longitude);
+      return {
+        x: (lon - lon0) * Math.cos((lat + lat0) / 2.0) * radius,
+        y: (lat - lat0) * radius
+      };
+    }
+
+    function buildFallbackScene() {
+      const points = [];
+      if (appState.aircraft) points.push(appState.aircraft);
+      for (const point of appState.track) points.push(point);
+      for (const target of appState.targets) points.push(target.position);
+      if (points.length === 0) return null;
+
+      const reference = appState.aircraft || points[0];
+      const localPoints = points.map((point) => toLocalXY(point, reference));
+      const xs = localPoints.map((item) => item.x);
+      const ys = localPoints.map((item) => item.y);
+
+      let minX = Math.min(...xs);
+      let maxX = Math.max(...xs);
+      let minY = Math.min(...ys);
+      let maxY = Math.max(...ys);
+
+      const minSpan = 500.0;
+      const padding = 80.0;
+      minX -= padding;
+      maxX += padding;
+      minY -= padding;
+      maxY += padding;
+
+      const spanX = Math.max(maxX - minX, minSpan);
+      const spanY = Math.max(maxY - minY, minSpan);
+      const cx = (minX + maxX) / 2.0;
+      const cy = (minY + maxY) / 2.0;
+
+      return {
+        reference,
+        bounds: {
+          minX: cx - spanX / 2.0,
+          maxX: cx + spanX / 2.0,
+          minY: cy - spanY / 2.0,
+          maxY: cy + spanY / 2.0,
+        }
+      };
+    }
+
+    function project(x, y, bounds, width, height) {
+      const sx = 20 + ((x - bounds.minX) / Math.max(bounds.maxX - bounds.minX, 1e-6)) * (width - 40);
+      const sy = 20 + (1 - ((y - bounds.minY) / Math.max(bounds.maxY - bounds.minY, 1e-6))) * (height - 40);
+      return { x: sx, y: sy };
+    }
+
+    function gridSpacing(span) {
+      if (span <= 1000) return 100;
+      if (span <= 5000) return 500;
+      return 1000;
+    }
+
+    function drawFallbackGrid(bounds, width, height) {
+      const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+      const spacing = gridSpacing(span);
+      const startX = Math.floor(bounds.minX / spacing) * spacing;
+      const endX = Math.ceil(bounds.maxX / spacing) * spacing;
+      const startY = Math.floor(bounds.minY / spacing) * spacing;
+      const endY = Math.ceil(bounds.maxY / spacing) * spacing;
+
+      fallbackCtx.lineWidth = 1;
+      for (let x = startX, index = 0; x <= endX; x += spacing, index += 1) {
+        const screen = project(x, bounds.minY, bounds, width, height);
+        fallbackCtx.strokeStyle = index % 5 === 0 ? "rgba(120, 173, 214, 0.28)" : "rgba(120, 173, 214, 0.16)";
+        fallbackCtx.beginPath();
+        fallbackCtx.moveTo(screen.x, 0);
+        fallbackCtx.lineTo(screen.x, height);
+        fallbackCtx.stroke();
+      }
+
+      for (let y = startY, index = 0; y <= endY; y += spacing, index += 1) {
+        const screen = project(bounds.minX, y, bounds, width, height);
+        fallbackCtx.strokeStyle = index % 5 === 0 ? "rgba(120, 173, 214, 0.28)" : "rgba(120, 173, 214, 0.16)";
+        fallbackCtx.beginPath();
+        fallbackCtx.moveTo(0, screen.y);
+        fallbackCtx.lineTo(width, screen.y);
+        fallbackCtx.stroke();
+      }
+    }
+
+    function renderFallback() {
+      if (mapState.mode === "leaflet") {
+        return;
+      }
+
+      const width = fallbackCanvas.clientWidth;
+      const height = fallbackCanvas.clientHeight;
+      fallbackCtx.clearRect(0, 0, width, height);
+      updateEmptyState();
+
+      const scene = buildFallbackScene();
+      if (!scene) {
+        return;
+      }
+
+      drawFallbackGrid(scene.bounds, width, height);
+
+      if (appState.track.length >= 2) {
+        fallbackCtx.strokeStyle = "#35c9c3";
+        fallbackCtx.lineWidth = 3;
+        fallbackCtx.beginPath();
+        appState.track.forEach((point, index) => {
+          const local = toLocalXY(point, scene.reference);
+          const screen = project(local.x, local.y, scene.bounds, width, height);
+          if (index === 0) {
+            fallbackCtx.moveTo(screen.x, screen.y);
+          } else {
+            fallbackCtx.lineTo(screen.x, screen.y);
+          }
+        });
+        fallbackCtx.stroke();
+      }
+
+      for (const target of appState.targets) {
+        const local = toLocalXY(target.position, scene.reference);
+        const screen = project(local.x, local.y, scene.bounds, width, height);
+        const isRed = target.vehicle_name.toLowerCase().includes("red");
+        fallbackCtx.fillStyle = isRed ? "#ef4444" : "#3b82f6";
+        fallbackCtx.strokeStyle = "#f8fafc";
+        fallbackCtx.lineWidth = 1.5;
+        fallbackCtx.beginPath();
+        fallbackCtx.rect(screen.x - 6, screen.y - 6, 12, 12);
+        fallbackCtx.fill();
+        fallbackCtx.stroke();
+      }
+
+      if (appState.aircraft) {
+        const local = toLocalXY(appState.aircraft, scene.reference);
+        const screen = project(local.x, local.y, scene.bounds, width, height);
+        fallbackCtx.fillStyle = "#38bdf8";
+        fallbackCtx.strokeStyle = "#f8fafc";
+        fallbackCtx.lineWidth = 2;
+        fallbackCtx.beginPath();
+        fallbackCtx.arc(screen.x, screen.y, 7, 0, Math.PI * 2);
+        fallbackCtx.fill();
+        fallbackCtx.stroke();
+      }
+    }
+
+    async function bootstrapMap() {
+      resizeFallbackCanvas();
+      const leafletLoaded = await ensureLeaflet();
+      if (leafletLoaded) {
+        initializeLeafletMap();
+        renderLeaflet();
+        return;
+      }
+      setMode("fallback");
+    }
+
+    window.mapApi = {
+      renderState(nextState) {
+        appState.aircraft = nextState && nextState.aircraft ? nextState.aircraft : null;
+        appState.track = nextState && Array.isArray(nextState.track) ? nextState.track : [];
+        appState.targets = nextState && Array.isArray(nextState.targets) ? nextState.targets : [];
+
+        if (mapState.mode === "leaflet" && mapState.map) {
+          renderLeaflet();
+        } else {
+          renderFallback();
+        }
+      },
+
+      setOfflineTileTemplate(template) {
+        if (!template) {
+          return;
+        }
+        config.localTileTemplate = template;
+        replaceOfflineLayer();
+      },
+
+      setOfflineMapInfo(info) {
+        mapState.offlineMapInfo = info || null;
+        mapState.mapLoaded = Boolean(info && info.path);
+        if (mapState.map) {
+          updateEmptyState();
+          fitMapToOfflineBounds();
+        }
+      },
+
+      reloadOfflineMap() {
+        replaceOfflineLayer();
+      },
+
+      resetViewToOfflineBounds() {
+        fitMapToOfflineBounds();
+      }
+    };
+
+    window.addEventListener("resize", () => {
+      resizeFallbackCanvas();
+      if (mapState.map) {
+        mapState.map.invalidateSize();
+      }
+    });
+
+    bootstrapMap();
+  </script>
+</body>
+</html>
