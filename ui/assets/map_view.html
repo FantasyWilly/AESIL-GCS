@@ -10,8 +10,8 @@
       --panel: rgba(8, 19, 31, 0.84);
       --text: #d7e7f4;
       --muted: rgba(215, 231, 244, 0.72);
-      --track: #35c9c3;
-      --aircraft: #38bdf8;
+      --track: #facc15;
+      --aircraft: #facc15;
       --red: #ef4444;
       --blue: #3b82f6;
       --grid: rgba(120, 173, 214, 0.16);
@@ -64,7 +64,7 @@
     }
 
     #legend {
-      right: 14px;
+      left: 14px;
       top: 14px;
       padding: 10px 12px;
       min-width: 180px;
@@ -150,15 +150,17 @@
     }
 
     .swatch.track {
-      width: 18px;
-      height: 0;
-      border: 0;
-      border-top: 3px solid var(--track);
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(15, 23, 42, 0.9);
+      border-radius: 50%;
+      background: var(--track);
     }
 
     .swatch.aircraft {
-      background: var(--aircraft);
-      border-radius: 50%;
+      background: center / contain no-repeat url("./icons/drone-aircraft.svg");
+      border: 0;
+      border-radius: 0;
     }
 
     .swatch.red {
@@ -167,6 +169,32 @@
 
     .swatch.blue {
       background: var(--blue);
+    }
+
+    .swatch.ref-red,
+    .swatch.ref-blue {
+      border: 0;
+      background: transparent;
+      position: relative;
+    }
+
+    .swatch.ref-red::before,
+    .swatch.ref-blue::before {
+      content: "X";
+      position: absolute;
+      inset: -2px 0 0 0;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .swatch.ref-red::before {
+      color: var(--red);
+    }
+
+    .swatch.ref-blue::before {
+      color: var(--blue);
     }
 
     #empty {
@@ -201,17 +229,19 @@
       background: #0a1624;
     }
 
-    .aircraft-marker,
-    .target-marker {
-      width: 8px;
-      height: 8px;
-      border: 1px solid #f8fafc;
-      box-shadow: 0 0 16px rgba(0, 0, 0, 0.28);
+    .aircraft-marker {
+      width: 26px;
+      height: 26px;
+      background: center / contain no-repeat url("./icons/drone-aircraft.svg");
+      filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.35));
     }
 
-    .aircraft-marker {
-      background: var(--aircraft);
-      border-radius: 50%;
+    .target-marker {
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(248, 250, 252, 0.92);
+      border-radius: 2px;
+      filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.28));
     }
 
     .target-marker.red {
@@ -222,8 +252,24 @@
       background: var(--blue);
     }
 
-    .target-marker {
-      border-radius: 1px;
+    .reference-marker {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      text-shadow: 0 0 6px rgba(7, 19, 31, 0.8);
+    }
+
+    .reference-marker.red {
+      color: var(--red);
+    }
+
+    .reference-marker.blue {
+      color: var(--blue);
     }
   </style>
 </head>
@@ -237,6 +283,8 @@
       <div class="legend-row"><span class="swatch aircraft"></span><span>Aircraft</span></div>
       <div class="legend-row"><span class="swatch red"></span><span>Red target</span></div>
       <div class="legend-row"><span class="swatch blue"></span><span>Blue target</span></div>
+      <div class="legend-row"><span class="swatch ref-red"></span><span>Red preset</span></div>
+      <div class="legend-row"><span class="swatch ref-blue"></span><span>Blue preset</span></div>
     </div>
     <div id="empty"><span>No map data yet</span></div>
   </div>
@@ -254,6 +302,7 @@
       localLeafletJs: "./vendor/leaflet/leaflet.js",
       cdnLeafletCss: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
       cdnLeafletJs: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+      aircraftIconPath: "./icons/drone-aircraft.svg",
       maxZoom: 19,
       localMaxZoom: 19,
       overzoomLevels: 4
@@ -263,14 +312,19 @@
       aircraft: null,
       track: [],
       targets: [],
+      testMode: {
+        enabled: false,
+        referenceTargets: [],
+      },
     };
 
     const mapState = {
       mode: "loading",
       map: null,
-      trackLine: null,
+      trackMarkers: [],
       aircraftMarker: null,
       targetMarkers: new Map(),
+      referenceMarkers: new Map(),
       userMovedMap: false,
       leafletReady: false,
       localLayer: null,
@@ -342,9 +396,49 @@
       return window.L.divIcon({
         className: "",
         html: `<div class="${className}"></div>`,
+        iconSize: className === "aircraft-marker" ? [26, 26] : [12, 12],
+        iconAnchor: className === "aircraft-marker" ? [13, 13] : [6, 6],
+      });
+    }
+
+    function makeReferenceIcon(color) {
+      return window.L.divIcon({
+        className: "",
+        html: `<div class="reference-marker ${color}">X</div>`,
         iconSize: [18, 18],
         iconAnchor: [9, 9],
       });
+    }
+
+    function normalizeTestModePayload(payload) {
+      const normalized = payload || {};
+      const references = Array.isArray(normalized.referenceTargets)
+        ? normalized.referenceTargets
+        : Array.isArray(normalized.reference_targets)
+          ? normalized.reference_targets
+          : [];
+      return {
+        enabled: Boolean(normalized.enabled),
+        referenceTargets: references,
+      };
+    }
+
+    function targetColorKey(target) {
+      const label = String(target && target.label ? target.label : "").toLowerCase();
+      const vehicle = String(target && target.vehicle_name ? target.vehicle_name : "").toLowerCase();
+      if (label.includes("red_mat") || label.includes("red")) {
+        return "red";
+      }
+      if (label.includes("blue_mat") || label.includes("blue")) {
+        return "blue";
+      }
+      if (vehicle.includes("red")) {
+        return "red";
+      }
+      if (vehicle.includes("blue")) {
+        return "blue";
+      }
+      return "blue";
     }
 
     function initializeLeafletMap() {
@@ -373,12 +467,6 @@
       });
 
       mapState.map = map;
-
-      mapState.trackLine = L.polyline([], {
-        color: "#35c9c3",
-        weight: 4,
-        opacity: 0.9,
-      }).addTo(map);
 
       addResetViewControl(map);
       setMode("leaflet");
@@ -493,8 +581,18 @@
       }
 
       const L = window.L;
-      const trackLatLngs = appState.track.map((point) => [point.latitude, point.longitude]);
-      mapState.trackLine.setLatLngs(trackLatLngs);
+      for (const marker of mapState.trackMarkers) {
+        mapState.map.removeLayer(marker);
+      }
+      mapState.trackMarkers = appState.track.map((point) => (
+        L.circleMarker([point.latitude, point.longitude], {
+          radius: 4,
+          color: "#0f172a",
+          weight: 1,
+          fillColor: "#facc15",
+          fillOpacity: 0.95,
+        }).addTo(mapState.map)
+      ));
 
       if (appState.aircraft) {
         const latLng = [appState.aircraft.latitude, appState.aircraft.longitude];
@@ -513,30 +611,64 @@
 
       const activeIds = new Set();
       for (const target of appState.targets) {
-        activeIds.add(target.tracker_id);
+        const targetKey = target.key || String(target.tracker_id);
+        activeIds.add(targetKey);
         const latLng = [target.position.latitude, target.position.longitude];
-        const cssClass = target.vehicle_name.toLowerCase().includes("red") ? "target-marker red" : "target-marker blue";
-        const popupText = `${target.vehicle_name} #${target.tracker_id}<br>${target.position.latitude.toFixed(6)}, ${target.position.longitude.toFixed(6)}`;
+        const colorKey = targetColorKey(target);
+        const cssClass = `target-marker ${colorKey}`;
+        const popupTitle = target.label || target.vehicle_name;
+        const popupText =
+          `${popupTitle} #${target.tracker_id}<br>${target.position.latitude.toFixed(6)}, ${target.position.longitude.toFixed(6)}`;
 
-        if (!mapState.targetMarkers.has(target.tracker_id)) {
+        if (!mapState.targetMarkers.has(targetKey)) {
           const marker = L.marker(latLng, {
             icon: makeDivIcon(cssClass),
-            title: `${target.vehicle_name} #${target.tracker_id}`,
+            title: `${popupTitle} #${target.tracker_id}`,
           }).addTo(mapState.map);
           marker.bindPopup(popupText);
-          mapState.targetMarkers.set(target.tracker_id, marker);
+          mapState.targetMarkers.set(targetKey, marker);
         } else {
-          const marker = mapState.targetMarkers.get(target.tracker_id);
+          const marker = mapState.targetMarkers.get(targetKey);
           marker.setLatLng(latLng);
           marker.setIcon(makeDivIcon(cssClass));
           marker.setPopupContent(popupText);
         }
       }
 
-      for (const [trackerId, marker] of mapState.targetMarkers.entries()) {
-        if (!activeIds.has(trackerId)) {
+      for (const [targetKey, marker] of mapState.targetMarkers.entries()) {
+        if (!activeIds.has(targetKey)) {
           mapState.map.removeLayer(marker);
-          mapState.targetMarkers.delete(trackerId);
+          mapState.targetMarkers.delete(targetKey);
+        }
+      }
+
+      const activeReferenceKeys = new Set();
+      const references = appState.testMode.enabled ? appState.testMode.referenceTargets : [];
+      for (const reference of references) {
+        activeReferenceKeys.add(reference.key);
+        const latLng = [reference.position.latitude, reference.position.longitude];
+        const popupText =
+          `${reference.label}<br>${reference.position.latitude.toFixed(6)}, ${reference.position.longitude.toFixed(6)}`;
+
+        if (!mapState.referenceMarkers.has(reference.key)) {
+          const marker = L.marker(latLng, {
+            icon: makeReferenceIcon(reference.color),
+            title: reference.label,
+          }).addTo(mapState.map);
+          marker.bindPopup(popupText);
+          mapState.referenceMarkers.set(reference.key, marker);
+        } else {
+          const marker = mapState.referenceMarkers.get(reference.key);
+          marker.setLatLng(latLng);
+          marker.setIcon(makeReferenceIcon(reference.color));
+          marker.setPopupContent(popupText);
+        }
+      }
+
+      for (const [referenceKey, marker] of mapState.referenceMarkers.entries()) {
+        if (!activeReferenceKeys.has(referenceKey)) {
+          mapState.map.removeLayer(marker);
+          mapState.referenceMarkers.delete(referenceKey);
         }
       }
 
@@ -561,6 +693,11 @@
       }
       for (const target of appState.targets) {
         points.push([target.position.latitude, target.position.longitude]);
+      }
+      if (appState.testMode.enabled) {
+        for (const reference of appState.testMode.referenceTargets) {
+          points.push([reference.position.latitude, reference.position.longitude]);
+        }
       }
 
       if (points.length === 0) {
@@ -605,6 +742,9 @@
       if (appState.aircraft) points.push(appState.aircraft);
       for (const point of appState.track) points.push(point);
       for (const target of appState.targets) points.push(target.position);
+      if (appState.testMode.enabled) {
+        for (const reference of appState.testMode.referenceTargets) points.push(reference.position);
+      }
       if (points.length === 0) return null;
 
       const reference = appState.aircraft || points[0];
@@ -697,33 +837,42 @@
 
       drawFallbackGrid(scene.bounds, width, height);
 
-      if (appState.track.length >= 2) {
-        fallbackCtx.strokeStyle = "#35c9c3";
-        fallbackCtx.lineWidth = 3;
-        fallbackCtx.beginPath();
-        appState.track.forEach((point, index) => {
+      if (appState.track.length > 0) {
+        for (const point of appState.track) {
           const local = toLocalXY(point, scene.reference);
           const screen = project(local.x, local.y, scene.bounds, width, height);
-          if (index === 0) {
-            fallbackCtx.moveTo(screen.x, screen.y);
-          } else {
-            fallbackCtx.lineTo(screen.x, screen.y);
-          }
-        });
-        fallbackCtx.stroke();
+          fallbackCtx.fillStyle = "#facc15";
+          fallbackCtx.strokeStyle = "#0f172a";
+          fallbackCtx.lineWidth = 1;
+          fallbackCtx.beginPath();
+          fallbackCtx.arc(screen.x, screen.y, 4, 0, Math.PI * 2);
+          fallbackCtx.fill();
+          fallbackCtx.stroke();
+        }
       }
 
       for (const target of appState.targets) {
         const local = toLocalXY(target.position, scene.reference);
         const screen = project(local.x, local.y, scene.bounds, width, height);
-        const isRed = target.vehicle_name.toLowerCase().includes("red");
-        fallbackCtx.fillStyle = isRed ? "#ef4444" : "#3b82f6";
+        fallbackCtx.fillStyle = targetColorKey(target) === "red" ? "#ef4444" : "#3b82f6";
         fallbackCtx.strokeStyle = "#f8fafc";
         fallbackCtx.lineWidth = 1.5;
         fallbackCtx.beginPath();
         fallbackCtx.rect(screen.x - 6, screen.y - 6, 12, 12);
         fallbackCtx.fill();
         fallbackCtx.stroke();
+      }
+
+      if (appState.testMode.enabled) {
+        fallbackCtx.font = "bold 18px DejaVu Sans";
+        fallbackCtx.textAlign = "center";
+        fallbackCtx.textBaseline = "middle";
+        for (const reference of appState.testMode.referenceTargets) {
+          const local = toLocalXY(reference.position, scene.reference);
+          const screen = project(local.x, local.y, scene.bounds, width, height);
+          fallbackCtx.fillStyle = reference.color === "red" ? "#ef4444" : "#3b82f6";
+          fallbackCtx.fillText("X", screen.x, screen.y);
+        }
       }
 
       if (appState.aircraft) {
@@ -756,6 +905,15 @@
         appState.track = nextState && Array.isArray(nextState.track) ? nextState.track : [];
         appState.targets = nextState && Array.isArray(nextState.targets) ? nextState.targets : [];
 
+        if (mapState.mode === "leaflet" && mapState.map) {
+          renderLeaflet();
+        } else {
+          renderFallback();
+        }
+      },
+
+      setTestModePayload(payload) {
+        appState.testMode = normalizeTestModePayload(payload);
         if (mapState.mode === "leaflet" && mapState.map) {
           renderLeaflet();
         } else {

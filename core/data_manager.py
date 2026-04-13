@@ -64,9 +64,13 @@ class DataManager:
         )
         tracker_id = int(message.get("tracker_id", 0))
         vehicle_name = str(message.get("vehicle_name", "unknown"))
+        label = str(message.get("label", ""))
+        key = self._target_key(tracker_id, label, vehicle_name)
         target = TargetRecord(
             tracker_id=tracker_id,
             vehicle_name=vehicle_name,
+            key=key,
+            label=label,
             position=point,
         )
         self.state.update_target(target)
@@ -79,6 +83,12 @@ class DataManager:
             timestamp=point.timestamp,
         )
         return True
+
+    def _target_key(self, tracker_id: int, label: str, vehicle_name: str) -> str:
+        label_key = label.strip().lower().replace(" ", "_")
+        vehicle_key = vehicle_name.strip().lower().replace(" ", "_")
+        suffix = label_key or vehicle_key or "unknown"
+        return f"{tracker_id}:{suffix}"
 
     def _as_float(self, value: Any, default: Optional[float] = None) -> Optional[float]:
         try:

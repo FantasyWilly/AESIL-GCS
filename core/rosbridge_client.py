@@ -8,6 +8,7 @@ import websocket
 
 MessageHandler = Callable[[str, dict], bool]
 StatusHandler = Callable[[str], None]
+DebugHandler = Callable[[str], None]
 
 
 class RosbridgeClient:
@@ -17,11 +18,14 @@ class RosbridgeClient:
         topics: Iterable[str],
         on_message: MessageHandler,
         on_status: Optional[StatusHandler] = None,
+        on_debug: Optional[DebugHandler] = None,
     ) -> None:
         self.url = url
         self.topics = list(topics)
         self.on_message = on_message
         self.on_status = on_status or (lambda _: None)
+        self.on_debug = on_debug or (lambda _: None)
+        self.debug_enabled = False
         self._app: Optional["websocket.WebSocketApp"] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -56,21 +60,35 @@ class RosbridgeClient:
         self.on_status(f"Subscribed:\n{topic_lines}")
 
     def _handle_raw_message(self, _ws: "websocket.WebSocketApp", raw: str) -> None:
+        if self.debug_enabled:
+            preview = raw if len(raw) <= 500 else raw[:500] + "…"
+            self.on_debug(f"RX {preview}")
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
             self.on_status("Ignored invalid JSON frame")
+            if self.debug_enabled:
+                self.on_debug("RX invalid JSON frame")
             return
 
-        if payload.get("op") != "publish":
+        op = payload.get("op")
+        if op != "publish":
+            if self.debug_enabled:
+                self.on_debug(f"RX op={op}")
             return
 
         topic = payload.get("topic")
         msg = payload.get("msg", {})
         if not isinstance(topic, str) or not isinstance(msg, dict):
+            if self.debug_enabled:
+                self.on_debug("RX publish missing topic/msg")
             return
 
         handled = self.on_message(topic, msg)
+        if self.debug_enabled:
+            self.on_debug(f"publish {topic} handled={handled}")
+            if handled:
+                self.on_debug(self._format_debug(topic, msg))
         if handled:
             self.on_status(f"Updated from {topic}")
 
@@ -86,3 +104,12 @@ class RosbridgeClient:
         self._app = None
         self._thread = None
         self.on_status(f"Connection closed ({status_code}): {message}")
+
+    def _format_debug(self, topic: str, msg: dict) -> str:
+        try:
+            payload = json.dumps(msg, ensure_ascii=False)
+        except (TypeError, ValueError):
+            payload = str(msg)
+        if len(payload) > 500:
+            payload = payload[:500] + "…"
+        return f"{topic} {payload}"

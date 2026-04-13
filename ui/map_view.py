@@ -26,8 +26,10 @@ class MapView(QWidget):
         self.state = state
         self._page_loaded = False
         self._last_payload = ""
+        self._last_test_payload = ""
         self._offline_tile_template = "http://127.0.0.1:8765/tiles/offline/{z}/{x}/{y}"
         self._offline_map_info: dict[str, Any] = {}
+        self._test_mode_payload: dict[str, Any] = {"enabled": False, "referenceTargets": []}
         self._html_path = Path(__file__).resolve().parent / "assets" / "map_view.html"
 
         self.browser = QWebEngineView(self)
@@ -81,6 +83,15 @@ class MapView(QWidget):
         script = f"window.mapApi && window.mapApi.setOfflineMapInfo({json.dumps(info, ensure_ascii=False)});"
         self.browser.page().runJavaScript(script)
 
+    def set_test_mode_payload(self, payload: dict[str, Any]) -> None:
+        self._test_mode_payload = payload
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        if not self._page_loaded or payload_json == self._last_test_payload:
+            return
+        self._last_test_payload = payload_json
+        script = f"window.mapApi && window.mapApi.setTestModePayload({payload_json});"
+        self.browser.page().runJavaScript(script)
+
     def reload_offline_map(self) -> None:
         if not self._page_loaded:
             return
@@ -96,6 +107,7 @@ class MapView(QWidget):
         if ok:
             self.set_offline_tile_template(self._offline_tile_template)
             self.set_offline_map_info(self._offline_map_info)
+            self.set_test_mode_payload(self._test_mode_payload)
             self.sync_state()
             return
         self.fallback.setPlainText(f"Failed to load map HTML:\n{self._html_path}")
@@ -111,7 +123,9 @@ class MapView(QWidget):
             "targets": [
                 {
                     "tracker_id": target.tracker_id,
+                    "key": target.key,
                     "vehicle_name": target.vehicle_name,
+                    "label": target.label,
                     "position": self._point_to_dict(target.position),
                 }
                 for target in targets.values()

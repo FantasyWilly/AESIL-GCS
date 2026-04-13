@@ -10,14 +10,19 @@ from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, 
 from core.data_manager import DataManager
 from core.logger import DataLogger
 from core.rosbridge_client import RosbridgeClient
-from core.state import AppState
+from core.state import AppState, GeoPoint, TargetRecord
 from core.tile_server import TileServer
 from ui.map_view import MapView
 from ui.widgets import ControlPanel
+from utils.geo import distance_meters
 
 
 class StatusBus(QObject):
     status_changed = pyqtSignal(str)
+
+
+class DebugBus(QObject):
+    debug_changed = pyqtSignal(str)
 
 
 class MainWindow(QMainWindow):
@@ -33,6 +38,8 @@ class MainWindow(QMainWindow):
         self.tile_server.start()
         self.status_bus = StatusBus()
         self.status_bus.status_changed.connect(self._apply_status)
+        self.debug_bus = DebugBus()
+        self.debug_bus.debug_changed.connect(self._apply_debug)
         self.client = RosbridgeClient(
             url=rosbridge_url,
             topics=[
@@ -41,6 +48,7 @@ class MainWindow(QMainWindow):
             ],
             on_message=self.data_manager.handle_message,
             on_status=self.update_status,
+            on_debug=self.update_debug,
         )
 
         self.map_view = MapView(self.state)
@@ -58,6 +66,7 @@ class MainWindow(QMainWindow):
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_view)
         self.refresh_timer.start(500)
+        self._topic_last_seen: dict[str, datetime] = {}
 
     def _wire_signals(self) -> None:
         self.panel.connect_button.clicked.connect(self.connect_rosbridge)
@@ -66,6 +75,14 @@ class MainWindow(QMainWindow):
         self.panel.export_xlsx_button.clicked.connect(self.export_xlsx)
         self.panel.save_image_button.clicked.connect(self.save_image)
         self.panel.select_mbtiles_button.clicked.connect(self.select_mbtiles)
+        self.panel.debug_checkbox.toggled.connect(self._toggle_debug)
+
+    def _toggle_debug(self, enabled: bool) -> None:
+        self.client.debug_enabled = enabled
+        self._apply_debug("Debug enabled" if enabled else "Debug disabled")
+
+    def update_debug(self, message: str) -> None:
+        self.debug_bus.debug_changed.emit(message)
 
     def _load_default_mbtiles(self) -> None:
         default_mbtiles = Path.cwd() / "data" / "offline.mbtiles"
@@ -113,6 +130,14 @@ class MainWindow(QMainWindow):
 
     def update_status(self, status: str) -> None:
         self.status_bus.status_changed.emit(status)
+        status_lower = status.lower()
+        if status_lower.startswith("updated from "):
+            topic = status[len("Updated from "):].strip()
+            if topic:
+                self._topic_last_seen[topic] = datetime.utcnow()
+
+    def _apply_debug(self, message: str) -> None:
+        self.panel.debug_output.appendPlainText(message)
 
     def _apply_status(self, status: str) -> None:
         self.panel.status_label.setText(status)
@@ -127,10 +152,136 @@ class MainWindow(QMainWindow):
         if aircraft:
             point = aircraft.point
             self.panel.aircraft_label.setText(
-                f"{point.latitude:.6f}, {point.longitude:.6f}, alt {point.altitude:.1f} m"
+                f"{point.latitude:.6f}, {point.longitude:.6f}"
             )
+        else:
+            self.panel.aircraft_label.setText("--")
         self.panel.target_label.setText(str(len(self.state.snapshot_targets())))
+        self._refresh_test_mode()
+        self._update_topic_status()
         self.map_view.sync_state()
+
+    def _update_topic_status(self) -> None:
+        now = datetime.utcnow()
+        self._apply_topic_status(self.panel.topic_external_label, DataManager.TARGET_TOPIC, now)
+        self._apply_topic_status(self.panel.topic_mavros_label, DataManager.AIRCRAFT_TOPIC, now)
+
+    def _apply_topic_status(self, label, topic: str, now: datetime) -> None:
+        last_seen = self._topic_last_seen.get(topic)
+        if last_seen and (now - last_seen).total_seconds() <= 2.0:
+            label.setText("Online")
+            label.setStyleSheet("color: #16a34a; font-weight: 600;")
+        else:
+            label.setText("Offline")
+            label.setStyleSheet("color: #9ca3af; font-weight: 600;")
+
+    def _refresh_test_mode(self) -> None:
+        test_enabled = self.panel.test_mode_checkbox.isChecked()
+        reference_targets = self._build_reference_targets() if test_enabled else []
+        self.map_view.set_test_mode_payload(
+            {
+                "enabled": test_enabled,
+                "referenceTargets": reference_targets,
+            }
+        )
+        self._update_test_errors(test_enabled)
+
+    def _build_reference_targets(self) -> list[dict[str, object]]:
+        references: list[dict[str, object]] = []
+        red_point = self._parse_reference_point(self.panel.red_lat_input.text(), self.panel.red_lon_input.text(), "red")
+        blue_point = self._parse_reference_point(
+            self.panel.blue_lat_input.text(), self.panel.blue_lon_input.text(), "blue"
+        )
+        if red_point:
+            references.append(
+                {
+                    "key": "red",
+                    "label": "Red preset",
+                    "color": "red",
+                    "position": self._point_to_dict(red_point),
+                }
+            )
+        if blue_point:
+            references.append(
+                {
+                    "key": "blue",
+                    "label": "Blue preset",
+                    "color": "blue",
+                    "position": self._point_to_dict(blue_point),
+                }
+            )
+        return references
+
+    def _update_test_errors(self, test_enabled: bool) -> None:
+        if not test_enabled:
+            self.panel.red_error_label.setText("--")
+            self.panel.blue_error_label.setText("--")
+            return
+
+        targets = self.state.snapshot_targets()
+        red_reference = self._parse_reference_point(
+            self.panel.red_lat_input.text(), self.panel.red_lon_input.text(), "red"
+        )
+        blue_reference = self._parse_reference_point(
+            self.panel.blue_lat_input.text(), self.panel.blue_lon_input.text(), "blue"
+        )
+
+        self.panel.red_error_label.setText(self._format_target_error("red", red_reference, targets))
+        self.panel.blue_error_label.setText(self._format_target_error("blue", blue_reference, targets))
+
+    def _format_target_error(
+        self,
+        color: str,
+        reference: GeoPoint | None,
+        targets: dict[str, TargetRecord],
+    ) -> str:
+        if reference is None:
+            return "Preset not set"
+
+        matches = self._find_color_targets(targets, color)
+        if not matches:
+            return "No detected target"
+
+        avg_lat, avg_lon = self._average_position(matches)
+        avg_point = GeoPoint(latitude=avg_lat, longitude=avg_lon)
+        delta_m = distance_meters(reference, avg_point)
+        return (
+            f"{delta_m:.2f} m\n"
+            f"avg: {avg_lat:.6f}, {avg_lon:.6f} ({len(matches)} pts)"
+        )
+
+    def _find_color_targets(self, targets: dict[str, TargetRecord], color: str) -> list[TargetRecord]:
+        results: list[TargetRecord] = []
+        for target in targets.values():
+            label_lower = target.label.lower()
+            vehicle_lower = target.vehicle_name.lower()
+            if color in label_lower or color in vehicle_lower:
+                results.append(target)
+        return results
+
+    def _average_position(self, targets: list[TargetRecord]) -> tuple[float, float]:
+        lat_sum = 0.0
+        lon_sum = 0.0
+        for target in targets:
+            lat_sum += target.position.latitude
+            lon_sum += target.position.longitude
+        count = max(len(targets), 1)
+        return lat_sum / count, lon_sum / count
+
+    def _parse_reference_point(self, lat_text: str, lon_text: str, source: str) -> GeoPoint | None:
+        try:
+            latitude = float(lat_text.strip())
+            longitude = float(lon_text.strip())
+        except ValueError:
+            return None
+        return GeoPoint(latitude=latitude, longitude=longitude, source=source)
+
+    def _point_to_dict(self, point: GeoPoint) -> dict[str, float]:
+        return {
+            "latitude": point.latitude,
+            "longitude": point.longitude,
+            "altitude": point.altitude,
+        }
 
     def export_csv(self) -> None:
         default_path = self._default_output_path("flight_log.csv")

@@ -26,14 +26,16 @@ class FlightSample:
 class TargetRecord:
     tracker_id: int
     vehicle_name: str
+    key: str
     position: GeoPoint
+    label: str = ""
 
 
 @dataclass(slots=True)
 class AppState:
     aircraft: Optional[FlightSample] = None
     aircraft_track: List[FlightSample] = field(default_factory=list)
-    targets: Dict[int, TargetRecord] = field(default_factory=dict)
+    targets: Dict[str, TargetRecord] = field(default_factory=dict)
     target_history: List[TargetRecord] = field(default_factory=list)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
@@ -44,7 +46,7 @@ class AppState:
 
     def update_target(self, record: TargetRecord) -> None:
         with self._lock:
-            self.targets[record.tracker_id] = record
+            self.targets[record.key] = record
             self.target_history.append(record)
 
     def snapshot_aircraft(self) -> Optional[FlightSample]:
@@ -55,6 +57,6 @@ class AppState:
         with self._lock:
             return list(self.aircraft_track)
 
-    def snapshot_targets(self) -> Dict[int, TargetRecord]:
+    def snapshot_targets(self) -> Dict[str, TargetRecord]:
         with self._lock:
             return dict(self.targets)

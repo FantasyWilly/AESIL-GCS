@@ -9,6 +9,22 @@ from core.state import GeoPoint
 EARTH_RADIUS_M = 6_378_137.0
 
 
+def distance_meters(point_a: GeoPoint, point_b: GeoPoint) -> float:
+    lat1 = math.radians(point_a.latitude)
+    lon1 = math.radians(point_a.longitude)
+    lat2 = math.radians(point_b.latitude)
+    lon2 = math.radians(point_b.longitude)
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    sin_dlat = math.sin(dlat / 2.0)
+    sin_dlon = math.sin(dlon / 2.0)
+    a = sin_dlat ** 2 + math.cos(lat1) * math.cos(lat2) * sin_dlon ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(1.0 - a, 0.0)))
+    return EARTH_RADIUS_M * c
+
+
 @dataclass(slots=True)
 class GeoProjector:
     reference: Optional[GeoPoint] = None
