@@ -51,7 +51,7 @@ class MapView(QWidget):
         layout.addWidget(self.fallback)
         layout.setCurrentWidget(self.browser)
 
-        self.setMinimumSize(720, 520)
+        self.setMinimumSize(520, 360)
 
     def save_image(self, file_path: str | Path) -> Path:
         path = Path(file_path)

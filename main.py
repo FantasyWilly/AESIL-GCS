@@ -6,7 +6,7 @@ from ui.main_window import MainWindow
 
 def main() -> int:
     app = QApplication(sys.argv)
-    window = MainWindow(rosbridge_url="ws://127.0.0.1:9090")
+    window = MainWindow(rosbridge_url="ws://192.168.50.73:9090")
     window.show()
     return app.exec()
 
