@@ -225,6 +225,28 @@
       pointer-events: none;
     }
 
+    #asset-warning {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      z-index: 900;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(137, 180, 216, 0.18);
+      background: var(--panel);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+      font-size: 12px;
+      line-height: 1.4;
+      color: rgba(215, 231, 244, 0.84);
+      pointer-events: none;
+      max-width: 360px;
+    }
+
+    #asset-warning.hidden {
+      display: none;
+    }
+
     .leaflet-container {
       background: #0a1624;
     }
@@ -287,6 +309,7 @@
       <div class="legend-row"><span class="swatch ref-blue"></span><span>Blue preset</span></div>
     </div>
     <div id="empty"><span>No map data yet</span></div>
+    <div id="asset-warning" class="hidden"></div>
   </div>
 
   <script>
@@ -294,6 +317,7 @@
     const fallbackCanvas = document.getElementById("fallback");
     const fallbackCtx = fallbackCanvas.getContext("2d");
     const empty = document.getElementById("empty");
+    const assetWarning = document.getElementById("asset-warning");
     const dpr = window.devicePixelRatio || 1;
 
     const config = {
@@ -383,9 +407,19 @@
           await injectScript(asset.js);
           if (window.L) {
             mapState.leafletReady = true;
+            if (asset.modeLabel.includes("CDN")) {
+              assetWarning.textContent = "Leaflet loaded from CDN. Offline use requires local Leaflet files in ui/assets/vendor/leaflet/.";
+              assetWarning.classList.remove("hidden");
+            } else {
+              assetWarning.classList.add("hidden");
+            }
             return true;
           }
         } catch (_error) {
+          if (asset.modeLabel.includes("local")) {
+            assetWarning.textContent = "Missing local Leaflet assets. Place leaflet.css and leaflet.js in ui/assets/vendor/leaflet/.";
+            assetWarning.classList.remove("hidden");
+          }
         }
       }
 
