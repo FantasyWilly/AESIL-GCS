@@ -978,6 +978,29 @@
 
       resetViewToOfflineBounds() {
         fitMapToOfflineBounds();
+      },
+
+      clearOverlay() {
+        appState.aircraft = null;
+        appState.track = [];
+        appState.targets = [];
+        if (mapState.map) {
+          for (const marker of mapState.trackMarkers) {
+            mapState.map.removeLayer(marker);
+          }
+          mapState.trackMarkers = [];
+          if (mapState.aircraftMarker) {
+            mapState.map.removeLayer(mapState.aircraftMarker);
+            mapState.aircraftMarker = null;
+          }
+          for (const [, marker] of mapState.targetMarkers.entries()) {
+            mapState.map.removeLayer(marker);
+          }
+          mapState.targetMarkers.clear();
+        }
+        mapState.userMovedMap = false;
+        renderLeaflet();
+        renderFallback();
       }
     };
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QWidget
+from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QTabWidget, QWidget
 
 from core.data_manager import DataManager
 from core.logger import DataLogger
@@ -13,6 +13,7 @@ from core.rosbridge_client import RosbridgeClient
 from core.state import AppState, GeoPoint, TargetRecord
 from core.tile_server import TileServer
 from ui.map_view import MapView
+from ui.camera_panel import CameraControlPanel
 from ui.widgets import ControlPanel
 from utils.geo import distance_meters
 
@@ -57,10 +58,14 @@ class MainWindow(QMainWindow):
         self._load_default_mbtiles()
         self._wire_signals()
 
+        self.right_tabs = QTabWidget()
+        self.right_tabs.addTab(self.panel, "GCS")
+        self.right_tabs.addTab(CameraControlPanel(), "Camera")
+
         root = QWidget()
         layout = QHBoxLayout(root)
         layout.addWidget(self.map_view, stretch=4)
-        layout.addWidget(self.panel, stretch=1)
+        layout.addWidget(self.right_tabs, stretch=1)
         self.setCentralWidget(root)
 
         self.refresh_timer = QTimer(self)
@@ -74,6 +79,7 @@ class MainWindow(QMainWindow):
         self.panel.export_csv_button.clicked.connect(self.export_csv)
         self.panel.export_xlsx_button.clicked.connect(self.export_xlsx)
         self.panel.save_image_button.clicked.connect(self.save_image)
+        self.panel.clear_overlay_button.clicked.connect(self.clear_overlay)
         self.panel.select_mbtiles_button.clicked.connect(self.select_mbtiles)
         self.panel.debug_checkbox.toggled.connect(self._toggle_debug)
 
@@ -313,6 +319,12 @@ class MainWindow(QMainWindow):
         if file_path:
             path = self.map_view.save_image(file_path)
             self.update_status(f"Saved image: {path}")
+
+    def clear_overlay(self) -> None:
+        self.state.clear()
+        self.map_view.clear_overlay()
+        self.panel.aircraft_label.setText("--")
+        self.panel.target_label.setText("0")
 
     def _default_output_path(self, filename: str) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")

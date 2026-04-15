@@ -102,6 +102,11 @@ class MapView(QWidget):
             return
         self.browser.page().runJavaScript("window.mapApi && window.mapApi.resetViewToOfflineBounds();")
 
+    def clear_overlay(self) -> None:
+        if not self._page_loaded:
+            return
+        self.browser.page().runJavaScript("window.mapApi && window.mapApi.clearOverlay();")
+
     def _handle_load_finished(self, ok: bool) -> None:
         self._page_loaded = ok
         if ok:

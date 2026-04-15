@@ -60,3 +60,10 @@ class AppState:
     def snapshot_targets(self) -> Dict[str, TargetRecord]:
         with self._lock:
             return dict(self.targets)
+
+    def clear(self) -> None:
+        with self._lock:
+            self.aircraft = None
+            self.aircraft_track.clear()
+            self.targets.clear()
+            self.target_history.clear()
