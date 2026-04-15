@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
+    from PyQt6.QtCore import pyqtSignal
     from PyQt6.QtWidgets import (
         QCheckBox,
         QFormLayout,
@@ -16,6 +17,7 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
+    from PySide6.QtCore import Signal as pyqtSignal
     from PySide6.QtWidgets import (
         QCheckBox,
         QFormLayout,
@@ -49,9 +51,18 @@ class CameraConfig:
 
 
 class CameraControlPanel(QWidget):
+    rtsp_apply_requested = pyqtSignal(str, int)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._controller: object | None = None
+
+        self.rtsp_input = QLineEdit("rtsp://192.168.50.73:8554/live/stream")
+        self.buffer_input = QSpinBox()
+        self.buffer_input.setRange(0, 10000)
+        self.buffer_input.setValue(300)
+        self.rtsp_apply_button = QPushButton("Apply RTSP")
+        self.stream_resolution_label = QLabel("--")
 
         self.ip_input = QLineEdit("192.168.50.73")
         self.port_input = QSpinBox()
@@ -95,6 +106,9 @@ class CameraControlPanel(QWidget):
         self.laser_off_button = QPushButton("Laser Off")
 
         form = QFormLayout()
+        form.addRow("RTSP URL", self.rtsp_input)
+        form.addRow("Buffer (ms)", self.buffer_input)
+        form.addRow("Resolution", self.stream_resolution_label)
         form.addRow("GCU IP", self.ip_input)
         form.addRow("Port", self.port_input)
         form.addRow("Width", self.width_input)
@@ -139,6 +153,7 @@ class CameraControlPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(self.rtsp_apply_button)
         layout.addWidget(self.connect_button)
         layout.addWidget(self.disconnect_button)
         layout.addWidget(self.status_label)
@@ -148,6 +163,7 @@ class CameraControlPanel(QWidget):
 
         self.connect_button.clicked.connect(self._connect)
         self.disconnect_button.clicked.connect(self._disconnect)
+        self.rtsp_apply_button.clicked.connect(self._apply_rtsp)
         self.gimbal_button.clicked.connect(self._send_gimbal)
         self.digital_zoom_apply_button.clicked.connect(self._apply_digital_zoom)
         self.zoom_set_button.clicked.connect(self._send_zoom_set)
@@ -173,6 +189,18 @@ class CameraControlPanel(QWidget):
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
+
+    def set_stream_resolution(self, text: str) -> None:
+        self.stream_resolution_label.setText(text)
+
+    def _apply_rtsp(self) -> None:
+        url = self.rtsp_input.text().strip()
+        buffer_ms = int(self.buffer_input.value())
+        self.rtsp_apply_requested.emit(url, buffer_ms)
+        if url:
+            self._set_status(f"RTSP applied: {url} (buffer {buffer_ms} ms)")
+        else:
+            self._set_status("RTSP URL is empty")
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         for widget in [

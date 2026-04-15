@@ -39,6 +39,7 @@ class ControlPanel(QWidget):
         self.save_image_button = QPushButton("Save Trajectory PNG")
         self.clear_overlay_button = QPushButton("Clear Overlay")
         self.select_mbtiles_button = QPushButton("Select MBTiles")
+        self.split_view_checkbox = QCheckBox("Map/Video split")
         self.status_label = QLabel("Idle")
         self.aircraft_label = QLabel("--")
         self.target_label = QLabel("0")
@@ -118,4 +119,5 @@ class ControlPanel(QWidget):
         layout.addWidget(self.save_image_button)
         layout.addWidget(self.clear_overlay_button)
         layout.addWidget(self.select_mbtiles_button)
+        layout.addWidget(self.split_view_checkbox)
         layout.addStretch(1)

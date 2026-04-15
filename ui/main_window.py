@@ -3,9 +3,9 @@
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QTabWidget, QWidget
+from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QSplitter, QTabWidget, QWidget
 
 from core.data_manager import DataManager
 from core.logger import DataLogger
@@ -14,6 +14,7 @@ from core.state import AppState, GeoPoint, TargetRecord
 from core.tile_server import TileServer
 from ui.map_view import MapView
 from ui.camera_panel import CameraControlPanel
+from ui.video_stream import VideoStreamWidget
 from ui.widgets import ControlPanel
 from utils.geo import distance_meters
 
@@ -53,18 +54,26 @@ class MainWindow(QMainWindow):
         )
 
         self.map_view = MapView(self.state)
+        self.video_view = VideoStreamWidget()
         self.panel = ControlPanel(rosbridge_url)
+        self.camera_panel = CameraControlPanel()
         self.map_view.set_offline_tile_template(self.tile_server.offline_tile_template)
         self._load_default_mbtiles()
         self._wire_signals()
 
         self.right_tabs = QTabWidget()
         self.right_tabs.addTab(self.panel, "GCS")
-        self.right_tabs.addTab(CameraControlPanel(), "Camera")
+        self.right_tabs.addTab(self.camera_panel, "Camera")
+
+        self.left_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.left_splitter.addWidget(self.map_view)
+        self.left_splitter.addWidget(self.video_view)
+        self.video_view.hide()
+        self.left_splitter.setSizes([1000, 0])
 
         root = QWidget()
         layout = QHBoxLayout(root)
-        layout.addWidget(self.map_view, stretch=4)
+        layout.addWidget(self.left_splitter, stretch=4)
         layout.addWidget(self.right_tabs, stretch=1)
         self.setCentralWidget(root)
 
@@ -82,6 +91,27 @@ class MainWindow(QMainWindow):
         self.panel.clear_overlay_button.clicked.connect(self.clear_overlay)
         self.panel.select_mbtiles_button.clicked.connect(self.select_mbtiles)
         self.panel.debug_checkbox.toggled.connect(self._toggle_debug)
+        self.panel.split_view_checkbox.toggled.connect(self._toggle_split_view)
+        self.camera_panel.rtsp_apply_requested.connect(self._apply_rtsp_stream)
+        self.video_view.resolution_changed.connect(self.camera_panel.set_stream_resolution)
+        self.video_view.status_changed.connect(self.update_status)
+
+    def _toggle_split_view(self, enabled: bool) -> None:
+        if enabled:
+            self.video_view.show()
+            total = max(self.left_splitter.height(), 2)
+            half = total // 2
+            self.left_splitter.setSizes([half, total - half])
+            return
+        self.video_view.hide()
+        self.left_splitter.setSizes([1000, 0])
+
+    def _apply_rtsp_stream(self, url: str, buffer_ms: int) -> None:
+        url = url.strip()
+        if url:
+            self.video_view.open_stream(url, buffer_ms=buffer_ms)
+        else:
+            self.video_view.stop_stream()
 
     def _toggle_debug(self, enabled: bool) -> None:
         self.client.debug_enabled = enabled
