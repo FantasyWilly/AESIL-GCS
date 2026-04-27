@@ -60,7 +60,7 @@ class CameraControlPanel(QWidget):
         self.rtsp_input = QLineEdit("rtsp://192.168.50.73:8554/live/stream")
         self.buffer_input = QSpinBox()
         self.buffer_input.setRange(0, 10000)
-        self.buffer_input.setValue(300)
+        self.buffer_input.setValue(200)
         self.rtsp_apply_button = QPushButton("Apply RTSP")
         self.stream_resolution_label = QLabel("--")
 

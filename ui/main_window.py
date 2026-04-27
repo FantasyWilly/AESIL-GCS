@@ -3,9 +3,9 @@
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QSplitter, QTabWidget, QWidget
+from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QSplitter, QTabWidget, QToolButton, QWidget
 
 from core.data_manager import DataManager
 from core.logger import DataLogger
@@ -14,6 +14,7 @@ from core.state import AppState, GeoPoint, TargetRecord
 from core.tile_server import TileServer
 from ui.map_view import MapView
 from ui.camera_panel import CameraControlPanel
+from ui.gazebo_panel import GazeboPanel
 from ui.video_stream import VideoStreamWidget
 from ui.widgets import ControlPanel
 from utils.geo import distance_meters
@@ -57,6 +58,27 @@ class MainWindow(QMainWindow):
         self.video_view = VideoStreamWidget()
         self.panel = ControlPanel(rosbridge_url)
         self.camera_panel = CameraControlPanel()
+        self.gazebo_panel = GazeboPanel()
+        self.split_overlay_button = QToolButton(self.map_view)
+        self.split_overlay_button.setText("Split View")
+        self.split_overlay_button.setCheckable(True)
+        self.split_overlay_button.setChecked(self.panel.split_view_checkbox.isChecked())
+        self.split_overlay_button.setStyleSheet(
+            "QToolButton {"
+            " background-color: rgba(15, 23, 42, 0.86);"
+            " color: #e2e8f0;"
+            " border: 1px solid rgba(148, 163, 184, 0.45);"
+            " border-radius: 8px;"
+            " padding: 6px 10px;"
+            "}"
+            "QToolButton:checked {"
+            " background-color: rgba(30, 64, 175, 0.9);"
+            " border-color: rgba(96, 165, 250, 0.9);"
+            "}"
+        )
+        self.map_view.installEventFilter(self)
+        self._position_split_overlay_button()
+        self.split_overlay_button.show()
         self.map_view.set_offline_tile_template(self.tile_server.offline_tile_template)
         self._load_default_mbtiles()
         self._wire_signals()
@@ -64,6 +86,7 @@ class MainWindow(QMainWindow):
         self.right_tabs = QTabWidget()
         self.right_tabs.addTab(self.panel, "GCS")
         self.right_tabs.addTab(self.camera_panel, "Camera")
+        self.right_tabs.addTab(self.gazebo_panel, "Gazebo")
 
         self.left_splitter = QSplitter(Qt.Orientation.Vertical)
         self.left_splitter.addWidget(self.map_view)
@@ -81,6 +104,7 @@ class MainWindow(QMainWindow):
         self.refresh_timer.timeout.connect(self.refresh_view)
         self.refresh_timer.start(500)
         self._topic_last_seen: dict[str, datetime] = {}
+        self._latest_bbox_payload: dict | None = None
 
     def _wire_signals(self) -> None:
         self.panel.connect_button.clicked.connect(self.connect_rosbridge)
@@ -91,9 +115,22 @@ class MainWindow(QMainWindow):
         self.panel.clear_overlay_button.clicked.connect(self.clear_overlay)
         self.panel.select_mbtiles_button.clicked.connect(self.select_mbtiles)
         self.panel.debug_checkbox.toggled.connect(self._toggle_debug)
-        self.panel.split_view_checkbox.toggled.connect(self._toggle_split_view)
+        self.panel.split_view_checkbox.toggled.connect(self._on_panel_split_toggled)
+        self.split_overlay_button.toggled.connect(self._on_overlay_split_toggled)
         self.camera_panel.rtsp_apply_requested.connect(self._apply_rtsp_stream)
+        self.gazebo_panel.gazebo_apply_requested.connect(self._apply_gazebo_stream)
+        self.gazebo_panel.gazebo_rtsp_apply_requested.connect(self._apply_gazebo_rtsp_stream)
+        self.gazebo_panel.draw_enabled_changed.connect(self.video_view.set_draw_enabled)
+        self.gazebo_panel.clear_bbox_requested.connect(self.video_view.clear_drawn_bbox)
+        self.gazebo_panel.start_tracking_requested.connect(self._call_start_tracking_latest)
+        self.gazebo_panel.start_follow_requested.connect(self._call_start_follow)
+        self.gazebo_panel.stop_follow_requested.connect(self._call_stop_follow)
+        self.gazebo_panel.start_attack_requested.connect(self._call_start_attack)
+        self.gazebo_panel.stop_attack_requested.connect(self._call_stop_attack)
+        self.gazebo_panel.stop_tracking_requested.connect(self._call_stop_tracking)
+        self.video_view.bbox_selected.connect(self._on_bbox_selected)
         self.video_view.resolution_changed.connect(self.camera_panel.set_stream_resolution)
+        self.video_view.resolution_changed.connect(self.gazebo_panel.set_stream_resolution)
         self.video_view.status_changed.connect(self.update_status)
 
     def _toggle_split_view(self, enabled: bool) -> None:
@@ -102,9 +139,33 @@ class MainWindow(QMainWindow):
             total = max(self.left_splitter.height(), 2)
             half = total // 2
             self.left_splitter.setSizes([half, total - half])
+            self._position_split_overlay_button()
             return
         self.video_view.hide()
         self.left_splitter.setSizes([1000, 0])
+        self._position_split_overlay_button()
+
+    def _on_panel_split_toggled(self, enabled: bool) -> None:
+        if self.split_overlay_button.isChecked() != enabled:
+            self.split_overlay_button.blockSignals(True)
+            self.split_overlay_button.setChecked(enabled)
+            self.split_overlay_button.blockSignals(False)
+        self._toggle_split_view(enabled)
+
+    def _on_overlay_split_toggled(self, enabled: bool) -> None:
+        if self.panel.split_view_checkbox.isChecked() != enabled:
+            self.panel.split_view_checkbox.blockSignals(True)
+            self.panel.split_view_checkbox.setChecked(enabled)
+            self.panel.split_view_checkbox.blockSignals(False)
+        self._toggle_split_view(enabled)
+
+    def _position_split_overlay_button(self) -> None:
+        margin = 12
+        size = self.split_overlay_button.sizeHint()
+        x = max(margin, self.map_view.width() - size.width() - margin)
+        y = margin
+        self.split_overlay_button.move(x, y)
+        self.split_overlay_button.raise_()
 
     def _apply_rtsp_stream(self, url: str, buffer_ms: int) -> None:
         url = url.strip()
@@ -112,6 +173,99 @@ class MainWindow(QMainWindow):
             self.video_view.open_stream(url, buffer_ms=buffer_ms)
         else:
             self.video_view.stop_stream()
+
+    def _apply_gazebo_stream(self, host: str, port: int) -> None:
+        host = host.strip() or "0.0.0.0"
+        self.video_view.open_gazebo_udp(host, int(port))
+
+    def _apply_gazebo_rtsp_stream(self, url: str) -> None:
+        url = url.strip()
+        if not url:
+            self.update_status("Gazebo RTSP URL is empty")
+            return
+        self.video_view.open_gazebo_rtsp(url)
+
+    def _on_bbox_selected(self, payload: dict) -> None:
+        self._latest_bbox_payload = payload
+        bbox = payload.get("bbox", {})
+        left = bbox.get("left", 0)
+        top = bbox.get("top", 0)
+        width = bbox.get("width", 0)
+        height = bbox.get("height", 0)
+        self.gazebo_panel.set_bbox_info(f"BBox: ({left},{top}) {width}x{height}")
+        if self.gazebo_panel.auto_start_tracking_checkbox.isChecked():
+            service = self.gazebo_panel.start_tracking_service_input.text().strip()
+            self._call_start_tracking_with_bbox(service, payload)
+        self.video_view.clear_drawn_bbox()
+
+    def _call_start_tracking_latest(self, service: str) -> None:
+        if self._latest_bbox_payload is None:
+            self.update_status("StartTracking skipped: no bbox yet")
+            return
+        self._call_start_tracking_with_bbox(service, self._latest_bbox_payload)
+
+    def _call_start_tracking_with_bbox(self, service: str, payload: dict) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StartTracking failed: empty service name")
+            return
+        bbox = payload.get("bbox", {})
+        w = int(bbox.get("width", 0))
+        h = int(bbox.get("height", 0))
+        if w <= 0 or h <= 0:
+            self.update_status("StartTracking skipped: invalid bbox size")
+            return
+        x = int(bbox.get("left", 0))
+        y = int(bbox.get("top", 0))
+        args = {"bbox": {"x": x, "y": y, "w": w, "h": h}}
+        ok = self.client.call_service(service, args)
+        if ok:
+            self.update_status(f"StartTracking called: {service} ({x},{y},{w},{h})")
+
+    def _call_stop_tracking(self, service: str) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StopTracking failed: empty service name")
+            return
+        ok = self.client.call_service(service, {})
+        if ok:
+            self.update_status(f"StopTracking called: {service}")
+
+    def _call_start_follow(self, service: str) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StartFollow failed: empty service name")
+            return
+        ok = self.client.call_service(service, {})
+        if ok:
+            self.update_status(f"StartFollow called: {service}")
+
+    def _call_stop_follow(self, service: str) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StopFollow failed: empty service name")
+            return
+        ok = self.client.call_service(service, {})
+        if ok:
+            self.update_status(f"StopFollow called: {service}")
+
+    def _call_start_attack(self, service: str) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StartAttack failed: empty service name")
+            return
+        ok = self.client.call_service(service, {})
+        if ok:
+            self.update_status(f"StartAttack called: {service}")
+
+    def _call_stop_attack(self, service: str) -> None:
+        service = service.strip()
+        if not service:
+            self.update_status("StopAttack failed: empty service name")
+            return
+        ok = self.client.call_service(service, {})
+        if ok:
+            self.update_status(f"StopAttack called: {service}")
 
     def _toggle_debug(self, enabled: bool) -> None:
         self.client.debug_enabled = enabled
@@ -365,3 +519,8 @@ class MainWindow(QMainWindow):
         self.client.disconnect()
         self.tile_server.stop()
         super().closeEvent(event)
+
+    def eventFilter(self, obj, event):  # pragma: no cover
+        if obj is self.map_view and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._position_split_overlay_button()
+        return super().eventFilter(obj, event)

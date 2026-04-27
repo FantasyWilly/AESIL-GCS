@@ -2,6 +2,7 @@
 
 import json
 import threading
+import uuid
 from typing import Callable, Iterable, Optional
 
 import websocket
@@ -28,6 +29,7 @@ class RosbridgeClient:
         self.debug_enabled = False
         self._app: Optional["websocket.WebSocketApp"] = None
         self._thread: Optional[threading.Thread] = None
+        self._send_lock = threading.Lock()
 
     def connect(self) -> None:
         if websocket is None:
@@ -53,6 +55,55 @@ class RosbridgeClient:
         self._thread = None
         self.on_status("Disconnected")
 
+    def publish(self, topic: str, msg: dict) -> bool:
+        topic = topic.strip()
+        if not topic:
+            self.on_status("Publish failed: empty topic")
+            return False
+        if self._app is None:
+            self.on_status("Publish failed: not connected")
+            return False
+        payload = {"op": "publish", "topic": topic, "msg": msg}
+        try:
+            with self._send_lock:
+                self._app.send(json.dumps(payload, ensure_ascii=False))
+            if self.debug_enabled:
+                preview = json.dumps(payload, ensure_ascii=False)
+                if len(preview) > 500:
+                    preview = preview[:500] + "…"
+                self.on_debug(f"TX {preview}")
+            return True
+        except Exception as exc:
+            self.on_status(f"Publish failed: {exc}")
+            return False
+
+    def call_service(self, service: str, args: dict | None = None) -> bool:
+        service = service.strip()
+        if not service:
+            self.on_status("Service call failed: empty service name")
+            return False
+        if self._app is None:
+            self.on_status("Service call failed: not connected")
+            return False
+        payload = {
+            "op": "call_service",
+            "service": service,
+            "args": args or {},
+            "id": str(uuid.uuid4()),
+        }
+        try:
+            with self._send_lock:
+                self._app.send(json.dumps(payload, ensure_ascii=False))
+            if self.debug_enabled:
+                preview = json.dumps(payload, ensure_ascii=False)
+                if len(preview) > 500:
+                    preview = preview[:500] + "…"
+                self.on_debug(f"TX {preview}")
+            return True
+        except Exception as exc:
+            self.on_status(f"Service call failed: {exc}")
+            return False
+
     def _handle_open(self, ws: "websocket.WebSocketApp") -> None:
         for topic in self.topics:
             ws.send(json.dumps({"op": "subscribe", "topic": topic}))
@@ -72,6 +123,10 @@ class RosbridgeClient:
             return
 
         op = payload.get("op")
+        if op == "service_response":
+            if self.debug_enabled:
+                self.on_debug(self._format_service_response(payload))
+            return
         if op != "publish":
             if self.debug_enabled:
                 self.on_debug(f"RX op={op}")
@@ -113,3 +168,15 @@ class RosbridgeClient:
         if len(payload) > 500:
             payload = payload[:500] + "…"
         return f"{topic} {payload}"
+
+    def _format_service_response(self, payload: dict) -> str:
+        service = payload.get("service", "")
+        result = payload.get("result", False)
+        values = payload.get("values", {})
+        try:
+            values_text = json.dumps(values, ensure_ascii=False)
+        except Exception:
+            values_text = str(values)
+        if len(values_text) > 500:
+            values_text = values_text[:500] + "…"
+        return f"service_response service={service} result={result} values={values_text}"

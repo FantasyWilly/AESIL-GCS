@@ -119,5 +119,4 @@ class ControlPanel(QWidget):
         layout.addWidget(self.save_image_button)
         layout.addWidget(self.clear_overlay_button)
         layout.addWidget(self.select_mbtiles_button)
-        layout.addWidget(self.split_view_checkbox)
         layout.addStretch(1)
