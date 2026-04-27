@@ -3,30 +3,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    from PyQt6.QtCore import pyqtSignal
+    from PyQt6.QtCore import Qt, pyqtSignal
     from PyQt6.QtWidgets import (
         QCheckBox,
         QFormLayout,
+        QFrame,
         QGridLayout,
         QGroupBox,
         QLabel,
         QLineEdit,
         QPushButton,
+        QScrollArea,
         QSpinBox,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Signal as pyqtSignal
+    from PySide6.QtCore import Qt, Signal as pyqtSignal
     from PySide6.QtWidgets import (
         QCheckBox,
         QFormLayout,
+        QFrame,
         QGridLayout,
         QGroupBox,
         QLabel,
         QLineEdit,
         QPushButton,
+        QScrollArea,
         QSpinBox,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
@@ -50,8 +56,62 @@ class CameraConfig:
     height: int
 
 
+class CollapsibleSection(QWidget):
+    def __init__(self, title: str, content: QWidget, expanded: bool = False, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._button = QToolButton()
+        self._button.setText(title)
+        self._button.setCheckable(True)
+        self._button.setChecked(expanded)
+        self._button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self._button.setMinimumHeight(42)
+        self._button.setStyleSheet(
+            "QToolButton {"
+            " color: #111111;"
+            " background: #ffffff;"
+            " font-weight: 600;"
+            " text-align: left;"
+            " padding: 6px 10px;"
+            " border: 1px solid #d9d9d9;"
+            " border-radius: 0px;"
+            "}"
+            "QToolButton:checked {"
+            " background: #f5f5f5;"
+            "}"
+            "QToolButton:hover {"
+            " background: #f2f2f2;"
+            "}"
+        )
+
+        self._content = content
+        self._content.setVisible(expanded)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._button)
+        layout.addWidget(self._content)
+
+        self._button.toggled.connect(self._on_toggled)
+
+    def _on_toggled(self, opened: bool) -> None:
+        self._content.setVisible(opened)
+        self._button.setArrowType(Qt.ArrowType.DownArrow if opened else Qt.ArrowType.RightArrow)
+
+
 class CameraControlPanel(QWidget):
     rtsp_apply_requested = pyqtSignal(str, int)
+    draw_enabled_changed = pyqtSignal(bool)
+    start_tracking_requested = pyqtSignal(str)
+    start_follow_requested = pyqtSignal(str)
+    stop_follow_requested = pyqtSignal(str)
+    start_attack_requested = pyqtSignal(str)
+    stop_attack_requested = pyqtSignal(str)
+    stop_tracking_requested = pyqtSignal(str)
+    clear_bbox_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -105,6 +165,82 @@ class CameraControlPanel(QWidget):
         self.laser_on_button = QPushButton("Laser On")
         self.laser_off_button = QPushButton("Laser Off")
 
+        self.draw_bbox_checkbox = QCheckBox("Enable box drawing")
+        self.draw_bbox_checkbox.setChecked(False)
+        self.auto_start_tracking_checkbox = QCheckBox("Auto call /tracking/start on release")
+        self.auto_start_tracking_checkbox.setChecked(True)
+        self.start_tracking_service_input = QLineEdit("/tracking/start")
+        self.stop_tracking_service_input = QLineEdit("/tracking/stop")
+        self.start_follow_service_input = QLineEdit("/follow/start")
+        self.stop_follow_service_input = QLineEdit("/follow/stop")
+        self.start_attack_service_input = QLineEdit("/attack/start")
+        self.stop_attack_service_input = QLineEdit("/attack/stop")
+        self.start_tracking_button = QPushButton("Call Start Tracking")
+        self.stop_tracking_button = QPushButton("Call Stop Tracking")
+        self.start_follow_button = QPushButton("Call Start Follow")
+        self.stop_follow_button = QPushButton("Call Stop Follow")
+        self.start_attack_button = QPushButton("Call Start Attack")
+        self.stop_attack_button = QPushButton("Call Stop Attack")
+        self.clear_bbox_button = QPushButton("Clear BBox")
+        self.bbox_info_label = QLabel("BBox: --")
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: #ffffff; }")
+
+        container = QWidget()
+        container.setStyleSheet("background: #ffffff; color: #111111;")
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(CollapsibleSection("Connect", self._build_connect_page(), expanded=True))
+        container_layout.addWidget(CollapsibleSection("Gimbal & Camera Control", self._build_gimbal_page(), expanded=False))
+        container_layout.addWidget(CollapsibleSection("Tracking System", self._build_tracking_page(), expanded=False))
+        container_layout.addStretch(1)
+        scroll.setWidget(container)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(scroll)
+
+        self.connect_button.clicked.connect(self._connect)
+        self.disconnect_button.clicked.connect(self._disconnect)
+        self.rtsp_apply_button.clicked.connect(self._apply_rtsp)
+        self.gimbal_button.clicked.connect(self._send_gimbal)
+        self.digital_zoom_apply_button.clicked.connect(self._apply_digital_zoom)
+        self.zoom_set_button.clicked.connect(self._send_zoom_set)
+        self.reset_button.clicked.connect(lambda: self._send_simple(camera_command.reset))
+        self.calibration_button.clicked.connect(lambda: self._send_simple(camera_command.calibration))
+        self.lock_button.clicked.connect(lambda: self._send_simple(camera_command.lock))
+        self.follow_button.clicked.connect(lambda: self._send_simple(camera_command.follow))
+        self.down_button.clicked.connect(lambda: self._send_simple(camera_command.down))
+        self.photo_button.clicked.connect(lambda: self._send_simple(camera_command.photo))
+        self.video_button.clicked.connect(lambda: self._send_simple(camera_command.video))
+        self.zoom_in_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_in))
+        self.zoom_out_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_out))
+        self.zoom_stop_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_stop))
+        self.focus_button.clicked.connect(lambda: self._send_simple(camera_command.focus))
+        self.osd_on_button.clicked.connect(lambda: self._send_simple(camera_command.osd_on))
+        self.osd_off_button.clicked.connect(lambda: self._send_simple(camera_command.osd_off))
+        self.laser_on_button.clicked.connect(lambda: self._send_simple(camera_command.laser_on))
+        self.laser_off_button.clicked.connect(lambda: self._send_simple(camera_command.laser_off))
+
+        self.draw_bbox_checkbox.toggled.connect(self.draw_enabled_changed.emit)
+        self.start_tracking_button.clicked.connect(self._call_start_tracking)
+        self.stop_tracking_button.clicked.connect(self._call_stop_tracking)
+        self.clear_bbox_button.clicked.connect(self.clear_bbox_requested.emit)
+        self.start_follow_button.clicked.connect(self._call_start_follow)
+        self.stop_follow_button.clicked.connect(self._call_stop_follow)
+        self.start_attack_button.clicked.connect(self._call_start_attack)
+        self.stop_attack_button.clicked.connect(self._call_stop_attack)
+
+        if _IMPORT_ERROR is not None:
+            self._set_status(f"Camera modules not available: {_IMPORT_ERROR}")
+            self._set_controls_enabled(False)
+
+    def _build_connect_page(self) -> QWidget:
+        page = QWidget()
         form = QFormLayout()
         form.addRow("RTSP URL", self.rtsp_input)
         form.addRow("Buffer (ms)", self.buffer_input)
@@ -114,6 +250,16 @@ class CameraControlPanel(QWidget):
         form.addRow("Width", self.width_input)
         form.addRow("Height", self.height_input)
 
+        layout = QVBoxLayout(page)
+        layout.addLayout(form)
+        layout.addWidget(self.rtsp_apply_button)
+        layout.addWidget(self.connect_button)
+        layout.addWidget(self.disconnect_button)
+        layout.addWidget(self.status_label)
+        return page
+
+    def _build_gimbal_page(self) -> QWidget:
+        page = QWidget()
         gimbal_group = QGroupBox("Gimbal")
         gimbal_layout = QGridLayout(gimbal_group)
         gimbal_layout.addWidget(QLabel("Pitch"), 0, 0)
@@ -151,47 +297,51 @@ class CameraControlPanel(QWidget):
             col = idx % 2
             action_layout.addWidget(button, row, col)
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.rtsp_apply_button)
-        layout.addWidget(self.connect_button)
-        layout.addWidget(self.disconnect_button)
-        layout.addWidget(self.status_label)
+        layout = QVBoxLayout(page)
         layout.addWidget(gimbal_group)
         layout.addWidget(action_group)
-        layout.addStretch(1)
+        return page
 
-        self.connect_button.clicked.connect(self._connect)
-        self.disconnect_button.clicked.connect(self._disconnect)
-        self.rtsp_apply_button.clicked.connect(self._apply_rtsp)
-        self.gimbal_button.clicked.connect(self._send_gimbal)
-        self.digital_zoom_apply_button.clicked.connect(self._apply_digital_zoom)
-        self.zoom_set_button.clicked.connect(self._send_zoom_set)
-        self.reset_button.clicked.connect(lambda: self._send_simple(camera_command.reset))
-        self.calibration_button.clicked.connect(lambda: self._send_simple(camera_command.calibration))
-        self.lock_button.clicked.connect(lambda: self._send_simple(camera_command.lock))
-        self.follow_button.clicked.connect(lambda: self._send_simple(camera_command.follow))
-        self.down_button.clicked.connect(lambda: self._send_simple(camera_command.down))
-        self.photo_button.clicked.connect(lambda: self._send_simple(camera_command.photo))
-        self.video_button.clicked.connect(lambda: self._send_simple(camera_command.video))
-        self.zoom_in_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_in))
-        self.zoom_out_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_out))
-        self.zoom_stop_button.clicked.connect(lambda: self._send_simple(camera_command.zoom_stop))
-        self.focus_button.clicked.connect(lambda: self._send_simple(camera_command.focus))
-        self.osd_on_button.clicked.connect(lambda: self._send_simple(camera_command.osd_on))
-        self.osd_off_button.clicked.connect(lambda: self._send_simple(camera_command.osd_off))
-        self.laser_on_button.clicked.connect(lambda: self._send_simple(camera_command.laser_on))
-        self.laser_off_button.clicked.connect(lambda: self._send_simple(camera_command.laser_off))
+    def _build_tracking_page(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout()
+        form.addRow("StartTracking Service", self.start_tracking_service_input)
+        form.addRow("StopTracking Service", self.stop_tracking_service_input)
+        form.addRow("StartFollow Service", self.start_follow_service_input)
+        form.addRow("StopFollow Service", self.stop_follow_service_input)
+        form.addRow("StartAttack Service", self.start_attack_service_input)
+        form.addRow("StopAttack Service", self.stop_attack_service_input)
 
-        if _IMPORT_ERROR is not None:
-            self._set_status(f"Camera modules not available: {_IMPORT_ERROR}")
-            self._set_controls_enabled(False)
+        image_group = QGroupBox("Image")
+        image_layout = QVBoxLayout(image_group)
+        image_layout.addWidget(self.start_tracking_button)
+        image_layout.addWidget(self.stop_tracking_button)
+        image_layout.addWidget(self.clear_bbox_button)
+
+        control_group = QGroupBox("Control")
+        control_layout = QVBoxLayout(control_group)
+        control_layout.addWidget(self.start_follow_button)
+        control_layout.addWidget(self.stop_follow_button)
+        control_layout.addWidget(self.start_attack_button)
+        control_layout.addWidget(self.stop_attack_button)
+
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.draw_bbox_checkbox)
+        layout.addWidget(self.auto_start_tracking_checkbox)
+        layout.addLayout(form)
+        layout.addWidget(image_group)
+        layout.addWidget(control_group)
+        layout.addWidget(self.bbox_info_label)
+        return page
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
     def set_stream_resolution(self, text: str) -> None:
         self.stream_resolution_label.setText(text)
+
+    def set_bbox_info(self, text: str) -> None:
+        self.bbox_info_label.setText(text)
 
     def _apply_rtsp(self) -> None:
         url = self.rtsp_input.text().strip()
@@ -201,6 +351,30 @@ class CameraControlPanel(QWidget):
             self._set_status(f"RTSP applied: {url} (buffer {buffer_ms} ms)")
         else:
             self._set_status("RTSP URL is empty")
+
+    def _call_start_tracking(self) -> None:
+        service = self.start_tracking_service_input.text().strip()
+        self.start_tracking_requested.emit(service)
+
+    def _call_start_follow(self) -> None:
+        service = self.start_follow_service_input.text().strip()
+        self.start_follow_requested.emit(service)
+
+    def _call_stop_follow(self) -> None:
+        service = self.stop_follow_service_input.text().strip()
+        self.stop_follow_requested.emit(service)
+
+    def _call_start_attack(self) -> None:
+        service = self.start_attack_service_input.text().strip()
+        self.start_attack_requested.emit(service)
+
+    def _call_stop_attack(self) -> None:
+        service = self.stop_attack_service_input.text().strip()
+        self.stop_attack_requested.emit(service)
+
+    def _call_stop_tracking(self) -> None:
+        service = self.stop_tracking_service_input.text().strip()
+        self.stop_tracking_requested.emit(service)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         for widget in [
