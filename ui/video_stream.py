@@ -210,6 +210,39 @@ class VideoStreamWidget(QWidget):
         self._stream_source = "gazebo_rtsp"
         self.status_changed.emit(f"Gazebo RTSP streaming: {rtsp_url}")
 
+    def open_camera_rtsp_gstreamer(self, url: str) -> None:
+        if cv2 is None:
+            self.status_changed.emit("Camera RTSP requires OpenCV (cv2) with GStreamer support")
+            self._stack.setCurrentWidget(self.placeholder)
+            return
+        rtsp_url = url.strip()
+        if not rtsp_url:
+            self.status_changed.emit("Camera RTSP URL is empty")
+            self._stack.setCurrentWidget(self.placeholder)
+            return
+        self.player.stop()
+        self._cleanup_vlc()
+        self._cleanup_opencv()
+        pipeline = (
+            f"rtspsrc location={rtsp_url} latency=50 protocols=tcp ! "
+            "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
+            "appsink drop=true sync=false"
+        )
+        self._opencv_capture = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if not self._opencv_capture.isOpened():
+            self._cleanup_opencv()
+            # fallback: some builds can open RTSP URL directly but not rtspsrc pipeline
+            self._opencv_capture = cv2.VideoCapture(rtsp_url)
+            if not self._opencv_capture.isOpened():
+                self._cleanup_opencv()
+                self.status_changed.emit(f"Camera RTSP open failed: {rtsp_url}")
+                self._stack.setCurrentWidget(self.placeholder)
+                return
+        self._opencv_timer.start()
+        self._stack.setCurrentWidget(self.frame_widget)
+        self._stream_source = "camera_rtsp"
+        self.status_changed.emit(f"Camera RTSP (OpenCV+GStreamer) streaming: {rtsp_url}")
+
     @staticmethod
     def _probe_udp_packets(udp_host: str, udp_port: int, timeout_ms: int = 600) -> bool:
         bind_host = udp_host.strip() or "0.0.0.0"

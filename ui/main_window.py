@@ -180,26 +180,12 @@ class MainWindow(QMainWindow):
         if not url:
             self.video_view.stop_stream()
             return
-        # Camera tab needs OpenCV rendering when bbox drawing is enabled.
-        # VLC/QVideoWidget path does not support interactive bbox overlay.
-        if self.camera_panel.draw_bbox_checkbox.isChecked():
-            self.video_view.open_gazebo_rtsp(url)
-            self.update_status("Camera RTSP opened in bbox mode")
-            return
-        self.video_view.open_stream(url, buffer_ms=buffer_ms)
+        self.video_view.open_camera_rtsp_gstreamer(url)
+        self.update_status("Camera RTSP opened via OpenCV+GStreamer")
 
     def _on_camera_draw_toggled(self, enabled: bool) -> None:
         self.video_view.set_draw_enabled(enabled)
-        # If user enables bbox while on Camera tab, switch RTSP to OpenCV path immediately.
-        if not enabled:
-            return
-        if self.right_tabs.currentWidget() is not self.camera_panel:
-            return
-        rtsp_url = self.camera_panel.rtsp_input.text().strip()
-        if not rtsp_url:
-            return
-        self.video_view.open_gazebo_rtsp(rtsp_url)
-        self.update_status("Camera bbox mode enabled")
+        # Camera path is already OpenCV+GStreamer; no backend switch needed.
 
     def _apply_gazebo_stream(self, host: str, port: int) -> None:
         host = host.strip() or "0.0.0.0"
