@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         self.panel.split_view_checkbox.toggled.connect(self._on_panel_split_toggled)
         self.split_overlay_button.toggled.connect(self._on_overlay_split_toggled)
         self.camera_panel.rtsp_apply_requested.connect(self._apply_rtsp_stream)
-        self.camera_panel.draw_enabled_changed.connect(self.video_view.set_draw_enabled)
+        self.camera_panel.draw_enabled_changed.connect(self._on_camera_draw_toggled)
         self.camera_panel.clear_bbox_requested.connect(self.video_view.clear_drawn_bbox)
         self.camera_panel.start_tracking_requested.connect(self._call_start_tracking_latest)
         self.camera_panel.start_follow_requested.connect(self._call_start_follow)
@@ -177,10 +177,29 @@ class MainWindow(QMainWindow):
 
     def _apply_rtsp_stream(self, url: str, buffer_ms: int) -> None:
         url = url.strip()
-        if url:
-            self.video_view.open_stream(url, buffer_ms=buffer_ms)
-        else:
+        if not url:
             self.video_view.stop_stream()
+            return
+        # Camera tab needs OpenCV rendering when bbox drawing is enabled.
+        # VLC/QVideoWidget path does not support interactive bbox overlay.
+        if self.camera_panel.draw_bbox_checkbox.isChecked():
+            self.video_view.open_gazebo_rtsp(url)
+            self.update_status("Camera RTSP opened in bbox mode")
+            return
+        self.video_view.open_stream(url, buffer_ms=buffer_ms)
+
+    def _on_camera_draw_toggled(self, enabled: bool) -> None:
+        self.video_view.set_draw_enabled(enabled)
+        # If user enables bbox while on Camera tab, switch RTSP to OpenCV path immediately.
+        if not enabled:
+            return
+        if self.right_tabs.currentWidget() is not self.camera_panel:
+            return
+        rtsp_url = self.camera_panel.rtsp_input.text().strip()
+        if not rtsp_url:
+            return
+        self.video_view.open_gazebo_rtsp(rtsp_url)
+        self.update_status("Camera bbox mode enabled")
 
     def _apply_gazebo_stream(self, host: str, port: int) -> None:
         host = host.strip() or "0.0.0.0"
