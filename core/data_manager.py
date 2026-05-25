@@ -77,6 +77,7 @@ class DataManager:
         self.logger.log_target(
             vehicle_name=vehicle_name,
             tracker_id=tracker_id,
+            label=label,
             latitude=point.latitude,
             longitude=point.longitude,
             altitude=point.altitude,

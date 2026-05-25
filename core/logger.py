@@ -14,6 +14,7 @@ class LogRow:
     event_type: str
     vehicle_name: str
     tracker_id: str
+    label: str
     latitude: str
     longitude: str
     altitude: str
@@ -26,6 +27,7 @@ class DataLogger:
         "event_type",
         "vehicle_name",
         "tracker_id",
+        "label",
         "latitude",
         "longitude",
         "altitude",
@@ -49,6 +51,7 @@ class DataLogger:
                 event_type="aircraft",
                 vehicle_name="",
                 tracker_id="",
+                label="",
                 latitude=f"{latitude:.8f}",
                 longitude=f"{longitude:.8f}",
                 altitude=f"{altitude:.3f}",
@@ -60,6 +63,7 @@ class DataLogger:
         self,
         vehicle_name: str,
         tracker_id: int,
+        label: str,
         latitude: float,
         longitude: float,
         altitude: float,
@@ -71,6 +75,7 @@ class DataLogger:
                 event_type="target",
                 vehicle_name=vehicle_name,
                 tracker_id=str(tracker_id),
+                label=label,
                 latitude=f"{latitude:.8f}",
                 longitude=f"{longitude:.8f}",
                 altitude=f"{altitude:.3f}",
@@ -107,6 +112,7 @@ class DataLogger:
             row.event_type,
             row.vehicle_name,
             row.tracker_id,
+            row.label,
             row.latitude,
             row.longitude,
             row.altitude,
